@@ -32,6 +32,62 @@
         box-shadow: 0 0 100px rgba(0, 255, 0, 1);
       }
 
+      /* Additional visualizers for first and second frequency bands */
+      #firstBeatVisualizer,
+      #secondBeatVisualizer {
+        width: 200px;
+        height: 200px;
+        border-radius: 50%;
+        background: radial-gradient(circle, #001100, #000000);
+        box-shadow: 0 0 30px rgba(0, 255, 0, 0.3);
+        transition: all 0.1s ease-out;
+        margin: 10px;
+        display: inline-block;
+      }
+
+      #firstBeatVisualizer.beat,
+      #secondBeatVisualizer.beat {
+        box-shadow: 0 0 60px rgba(0, 255, 0, 1);
+      }
+
+      .visualizer-row {
+        display: flex;
+        gap: 20px;
+        align-items: center;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+
+      .visualizer-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .viz-label {
+        margin-top: 8px;
+        font-size: 14px;
+        color: #0f0;
+        opacity: 0.8;
+      }
+
+      /* Mini progress bars for band beat probabilities */
+      .mini-progress {
+        width: 140px;
+        height: 6px;
+        background: #002200;
+        border: 1px solid #0f0;
+        margin-top: 6px;
+        overflow: hidden;
+      }
+
+      .mini-fill {
+        height: 100%;
+        background: #0f0;
+        width: 0%;
+        transition: width 0.1s;
+      }
+
       button {
         background: #003300;
         color: #0f0;
@@ -110,7 +166,27 @@
     <h1>Micro Beat Detection</h1>
     <div id="status">Click "Start" to begin</div>
 
-    <div id="beatVisualizer"></div>
+    <div class="visualizer-item">
+      <div id="beatVisualizer"></div>
+      <div class="viz-label">Overall</div>
+    </div>
+
+    <div class="visualizer-row">
+      <div class="visualizer-item">
+        <div id="firstBeatVisualizer"></div>
+        <div class="viz-label">Low</div>
+        <div class="mini-progress">
+          <div id="beatProbBarFirstSmall" class="mini-fill"></div>
+        </div>
+      </div>
+      <div class="visualizer-item">
+        <div id="secondBeatVisualizer"></div>
+        <div class="viz-label">Mid</div>
+        <div class="mini-progress">
+          <div id="beatProbBarSecondSmall" class="mini-fill"></div>
+        </div>
+      </div>
+    </div>
 
     <div>
       <button id="startBtn">Start</button>
@@ -154,6 +230,31 @@
           <div id="lightBar" class="progress-fill"></div>
         </div>
       </div>
+      <div class="metric">
+        <div>Band Thresholds</div>
+        <label style="display: block; margin-top: 6px"
+          >Low Threshold
+          <input
+            id="firstThreshold"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value="0.5"
+          />
+        </label>
+        <label style="display: block; margin-top: 6px"
+          >Mid Threshold
+          <input
+            id="secondThreshold"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value="0.5"
+          />
+        </label>
+      </div>
     </div>
 
     <div id="console"></div>
@@ -164,6 +265,7 @@
       // Larger sizes provide finer frequency resolution but increase latency;
       // 256 balances responsiveness and resolution for real-time beat detection.
       const FFT_SIZE = 256;
+
       // Number of recent samples used for rolling averages/variance.
       // Acts as the window length for smoothing signal and band magnitudes.
       const FREQUENCY_MAGNITUDE_SAMPLES = 5;
@@ -249,9 +351,27 @@
       let durationSinceLastBeat = 0;
       let beatProbability = 0;
 
+      let lastBeatTimestampFirst = 0;
+      let durationSinceLastBeatFirst = 0;
+      let beatProbabilityFirst = 0;
+
+      let lastBeatTimestampSecond = 0;
+      let durationSinceLastBeatSecond = 0;
+      let beatProbabilitySecond = 0;
+      let beatProbabilityThresholdFirst = 0.5;
+      let beatProbabilityThresholdSecond = 0.5;
+
       let lightIntensityBumpTimestamp = 0;
       let lightIntensityBumpValue = 0;
       let lightIntensityValue = 0;
+
+      let lightIntensityBumpTimestampFirst = 0;
+      let lightIntensityBumpValueFirst = 0;
+      let lightIntensityValueFirst = 0;
+
+      let lightIntensityBumpTimestampSecond = 0;
+      let lightIntensityBumpValueSecond = 0;
+      let lightIntensityValueSecond = 0;
 
       // UI Elements
       const startBtn = document.getElementById("startBtn");
@@ -259,10 +379,28 @@
       const status = document.getElementById("status");
       const consoleDiv = document.getElementById("console");
       const beatVisualizer = document.getElementById("beatVisualizer");
+      const firstBeatVisualizer = document.getElementById(
+        "firstBeatVisualizer"
+      );
+      const secondBeatVisualizer = document.getElementById(
+        "secondBeatVisualizer"
+      );
+      const firstThresholdInput = document.getElementById("firstThreshold");
+      const secondThresholdInput = document.getElementById("secondThreshold");
 
       // Event Listeners
       startBtn.addEventListener("click", start);
       stopBtn.addEventListener("click", stop);
+      if (firstThresholdInput) {
+        firstThresholdInput.addEventListener("input", (e) => {
+          beatProbabilityThresholdFirst = parseFloat(e.target.value);
+        });
+      }
+      if (secondThresholdInput) {
+        secondThresholdInput.addEventListener("input", (e) => {
+          beatProbabilityThresholdSecond = parseFloat(e.target.value);
+        });
+      }
 
       async function start() {
         try {
@@ -321,7 +459,11 @@
         getFrequencyData();
         processFrequencyData();
         updateBeatProbability();
+        updateFirstBeatProbability();
+        updateSecondBeatProbability();
         updateLightIntensityBasedOnBeats();
+        updateLightIntensityBasedOnBeatsFirst();
+        updateLightIntensityBasedOnBeatsSecond();
         updateVisuals();
       }
 
@@ -589,6 +731,121 @@
         return recencyFactor;
       }
 
+      function calculateRecencyFactorFor(lastTimestamp) {
+        const duration = Date.now() - lastTimestamp;
+        const referenceDuration =
+          MINIMUM_DELAY_BETWEEN_BEATS - SINGLE_BEAT_DURATION;
+        let recencyFactor = 1 - referenceDuration / duration;
+        recencyFactor = Math.max(0, Math.min(1, recencyFactor));
+        return recencyFactor;
+      }
+
+      function updateFirstBeatProbability() {
+        const magnitudeFirstFactor = calculateFirstMagnitudeFactor();
+        const varianceFirstFactor = calculateFirstVarianceFactor();
+        const recencyFirstFactor = calculateRecencyFactorFor(
+          lastBeatTimestampFirst
+        );
+
+        beatProbabilityFirst =
+          magnitudeFirstFactor * varianceFirstFactor * recencyFirstFactor;
+
+        if (beatProbabilityFirst >= beatProbabilityThresholdFirst) {
+          lastBeatTimestampFirst = Date.now();
+          durationSinceLastBeatFirst = 0;
+          onBeatDetectedFirst();
+        }
+
+        updateProgressBar("beatProbBarFirstSmall", beatProbabilityFirst);
+      }
+
+      function updateSecondBeatProbability() {
+        const magnitudeSecondFactor = calculateSecondMagnitudeFactor();
+        const varianceSecondFactor = calculateSecondVarianceFactor();
+        const recencySecondFactor = calculateRecencyFactorFor(
+          lastBeatTimestampSecond
+        );
+
+        beatProbabilitySecond =
+          magnitudeSecondFactor * varianceSecondFactor * recencySecondFactor;
+
+        if (beatProbabilitySecond >= beatProbabilityThresholdSecond) {
+          lastBeatTimestampSecond = Date.now();
+          durationSinceLastBeatSecond = 0;
+          onBeatDetectedSecond();
+        }
+
+        updateProgressBar("beatProbBarSecondSmall", beatProbabilitySecond);
+      }
+
+      function calculateFirstMagnitudeFactor() {
+        let aboveAverageFirstMagnitudeFactor =
+          currentFirstFrequencyMagnitude / averageFirstFrequencyMagnitude;
+        aboveAverageFirstMagnitudeFactor -= 0.1;
+        aboveAverageFirstMagnitudeFactor *= 1.5;
+        aboveAverageFirstMagnitudeFactor = Math.pow(
+          aboveAverageFirstMagnitudeFactor,
+          3
+        );
+        aboveAverageFirstMagnitudeFactor /= 3;
+        aboveAverageFirstMagnitudeFactor -= 1.25;
+        aboveAverageFirstMagnitudeFactor = Math.max(
+          0,
+          Math.min(1, aboveAverageFirstMagnitudeFactor)
+        );
+        return aboveAverageFirstMagnitudeFactor;
+      }
+
+      function calculateSecondMagnitudeFactor() {
+        let aboveAverageSecondMagnitudeFactor =
+          currentSecondFrequencyMagnitude / averageSecondFrequencyMagnitude;
+        aboveAverageSecondMagnitudeFactor -= 1.01;
+        aboveAverageSecondMagnitudeFactor *= 10;
+        aboveAverageSecondMagnitudeFactor = Math.max(
+          0,
+          Math.min(1, aboveAverageSecondMagnitudeFactor)
+        );
+        return aboveAverageSecondMagnitudeFactor;
+      }
+
+      function calculateFirstVarianceFactor() {
+        let firstVarianceFactor =
+          (firstFrequencyMagnitudeVariance - 50) / 20 - 1;
+        firstVarianceFactor = Math.max(0, Math.min(1, firstVarianceFactor));
+        return firstVarianceFactor;
+      }
+
+      function calculateSecondVarianceFactor() {
+        let secondVarianceFactor =
+          (secondFrequencyMagnitudeVariance - 50) / 20 - 1;
+        secondVarianceFactor = Math.max(0, Math.min(1, secondVarianceFactor));
+        return secondVarianceFactor;
+      }
+
+      function updateLightIntensityBasedOnBeatsFirst() {
+        durationSinceLastBeatFirst = Date.now() - lastBeatTimestampFirst;
+        let intensity =
+          1 - durationSinceLastBeatFirst / LIGHT_FADE_OUT_DURATION;
+        intensity = Math.max(0, Math.min(1, intensity));
+
+        if (intensity > lightIntensityValueFirst) {
+          lightIntensityBumpValueFirst = intensity;
+          lightIntensityBumpTimestampFirst = Date.now();
+        }
+      }
+
+      function updateLightIntensityBasedOnBeatsSecond() {
+        durationSinceLastBeatSecond = Date.now() - lastBeatTimestampSecond;
+        let intensity =
+          1 - durationSinceLastBeatSecond / LIGHT_FADE_OUT_DURATION;
+        intensity = Math.max(0, Math.min(1, intensity));
+
+        if (intensity > lightIntensityValueSecond) {
+          lightIntensityBumpValueSecond = intensity;
+          lightIntensityBumpTimestampSecond = Date.now();
+        }
+      }
+
       function updateLightIntensityBasedOnBeats() {
         let intensity = 1 - durationSinceLastBeat / LIGHT_FADE_OUT_DURATION;
         intensity = Math.max(0, Math.min(1, intensity));
@@ -621,6 +878,60 @@
           50 + scaledLightIntensity * 150
         }px rgba(0, 255, 0, ${scaledLightIntensity})`;
 
+        // First band visualizer — beat-based fade (no baseline)
+        const durationSinceLastBumpFirst =
+          Date.now() - lightIntensityBumpTimestampFirst;
+        let fadeFactorFirst =
+          1 - durationSinceLastBumpFirst / LIGHT_FADE_OUT_DURATION;
+        fadeFactorFirst = Math.max(0, Math.min(1, fadeFactorFirst));
+
+        lightIntensityValueFirst =
+          lightIntensityBumpValueFirst * fadeFactorFirst;
+        lightIntensityValueFirst = Math.max(
+          0,
+          Math.min(1, lightIntensityValueFirst)
+        );
+
+        const scaledLightIntensityFirst = lightIntensityValueFirst;
+
+        firstBeatVisualizer.style.background = `radial-gradient(circle,
+                rgba(0, ${Math.floor(
+                  255 * scaledLightIntensityFirst
+                )}, ${Math.floor(
+          255 * scaledLightIntensityFirst
+        )}, ${scaledLightIntensityFirst}),
+                #000000)`;
+        firstBeatVisualizer.style.boxShadow = `0 0 ${
+          30 + scaledLightIntensityFirst * 90
+        }px rgba(0, 255, 255, ${scaledLightIntensityFirst})`;
+
+        // Second band visualizer — beat-based fade (no baseline)
+        const durationSinceLastBumpSecond =
+          Date.now() - lightIntensityBumpTimestampSecond;
+        let fadeFactorSecond =
+          1 - durationSinceLastBumpSecond / LIGHT_FADE_OUT_DURATION;
+        fadeFactorSecond = Math.max(0, Math.min(1, fadeFactorSecond));
+
+        lightIntensityValueSecond =
+          lightIntensityBumpValueSecond * fadeFactorSecond;
+        lightIntensityValueSecond = Math.max(
+          0,
+          Math.min(1, lightIntensityValueSecond)
+        );
+
+        const scaledLightIntensitySecond = lightIntensityValueSecond;
+
+        secondBeatVisualizer.style.background = `radial-gradient(circle,
+                rgba(${Math.floor(
+                  255 * scaledLightIntensitySecond
+                )}, ${Math.floor(
+          200 * scaledLightIntensitySecond
+        )}, 0, ${scaledLightIntensitySecond}),
+                #000000)`;
+        secondBeatVisualizer.style.boxShadow = `0 0 ${
+          30 + scaledLightIntensitySecond * 90
+        }px rgba(255, 200, 0, ${scaledLightIntensitySecond})`;
+
         updateProgressBar("signalBar", currentSignal / MAXIMUM_SIGNAL_VALUE);
         updateProgressBar("lightBar", lightIntensityValue);
       }
@@ -629,6 +940,18 @@
         beatVisualizer.classList.add("beat");
         setTimeout(() => beatVisualizer.classList.remove("beat"), 100);
         log("BEAT DETECTED!");
+      }
+
+      function onBeatDetectedFirst() {
+        firstBeatVisualizer.classList.add("beat");
+        setTimeout(() => firstBeatVisualizer.classList.remove("beat"), 100);
+        log("LOW-BAND BEAT!");
+      }
+
+      function onBeatDetectedSecond() {
+        secondBeatVisualizer.classList.add("beat");
+        setTimeout(() => secondBeatVisualizer.classList.remove("beat"), 100);
+        log("MID-BAND BEAT!");
       }
 
       function updateProgressBar(id, value) {
